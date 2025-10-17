@@ -1,31 +1,91 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
-
 const locationUrl = "https://lydix.de/friendsmap";
-// Global variables
 let map = null;
 let markers = [];
+let arrows = []; // Store arrow polylines
 let isLocationEnabled = false;
 let deviceId = null;
+let lastMyPosition = null; // Track previous position for movement calculation
+
+// Settings variables
+let settings = {
+  updateInterval: 10,
+  showArrows: true,
+  followMode: "delta",
+  locationAccuracy: true,
+  deviceName: "",
+};
 
 // Wait for the deviceready event before using any of Cordova's device APIs.
 document.addEventListener("deviceready", onDeviceReady, false);
+
+// Settings modal functionality
+document.addEventListener("DOMContentLoaded", function () {
+  const settingsButton = document.getElementById("settingsButton");
+  const settingsModal = document.getElementById("settingsModal");
+  const closeSettings = document.getElementById("closeSettings");
+  const saveSettings = document.getElementById("saveSettings");
+
+  // Load saved settings
+  loadSettings();
+
+  // Open settings modal
+  settingsButton.addEventListener("click", function () {
+    settingsModal.classList.add("show");
+    populateSettingsForm();
+  });
+
+  // Close settings modal
+  closeSettings.addEventListener("click", function () {
+    settingsModal.classList.remove("show");
+  });
+
+  // Close modal when clicking outside
+  settingsModal.addEventListener("click", function (e) {
+    if (e.target === settingsModal) {
+      settingsModal.classList.remove("show");
+    }
+  });
+
+  // Save settings
+  saveSettings.addEventListener("click", function () {
+    saveSettingsFromForm();
+    settingsModal.classList.remove("show");
+  });
+});
+
+function loadSettings() {
+  const saved = localStorage.getItem("friendsmap-settings");
+  if (saved) {
+    settings = { ...settings, ...JSON.parse(saved) };
+  }
+}
+
+function saveSettingsToStorage() {
+  localStorage.setItem("friendsmap-settings", JSON.stringify(settings));
+}
+
+function populateSettingsForm() {
+  document.getElementById("updateInterval").value = settings.updateInterval;
+  document.getElementById("showArrows").checked = settings.showArrows;
+  document.getElementById("followMode").value = settings.followMode;
+  document.getElementById("locationAccuracy").checked =
+    settings.locationAccuracy;
+  document.getElementById("deviceName").value = settings.deviceName;
+}
+
+function saveSettingsFromForm() {
+  settings.updateInterval = parseInt(
+    document.getElementById("updateInterval").value
+  );
+  settings.showArrows = document.getElementById("showArrows").checked;
+  settings.followMode = document.getElementById("followMode").value;
+  settings.locationAccuracy =
+    document.getElementById("locationAccuracy").checked;
+  settings.deviceName = document.getElementById("deviceName").value;
+
+  saveSettingsToStorage();
+  console.log("Settings saved:", settings);
+}
 
 function generateDeviceId() {
   // Try to get device UUID first, fallback to generated ID
@@ -60,54 +120,69 @@ function initializeMap() {
 
 function onDeviceReady() {
   deviceId = generateDeviceId();
-  console.log("Device ID:", deviceId);
   initializeMap();
   mainloop();
 }
 
-// Promisify geolocation
-function getCurrentPosition(options = {}) {
-  return new Promise((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(resolve, reject, options);
-  });
-}
-
 async function mainloop() {
-  updateLocationStatus("Getting your location...", "loading");
+  while (true) {
+    try {
+      updateLocationStatus("Getting your location...", "loading");
+      const position = await getCurrentPosition();
+      updateLocationStatus(
+        "Location obtained",
+        "success",
+        `Latitude: ${position.coords.latitude}<br>Longitude: ${position.coords.longitude}`
+      );
 
-  try {
-    // Get current position
-    const position = await getCurrentPosition({
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 300000, // 5 minutes
-    });
-    await onLocationSuccess(position);
-  } catch (error) {
-    onLocationError(error);
+      updateLocationStatus("Sending your location to server...", "loading");
+      const locations = await sendLocation(position);
+      updateLocationStatus("Location sent successfully", "success");
+
+      updateLocationStatus("Updating map...", "loading");
+      await updateMap(locations);
+      updateLocationStatus("Map updated successfully", "success");
+    } catch (error) {
+      console.error(error);
+      updateLocationStatus(error.message, "error");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10000)); // Wait 60 seconds before next update
   }
 }
 
-async function onLocationSuccess(position) {
-  console.log("Location found:", position);
-  updateLocationStatus("Location found", "success");
+async function getCurrentPosition(
+  options = {
+    enableHighAccuracy: true,
+    timeout: 5000,
+    maximumAge: 300000, // 5 minutes
+  }
+) {
   try {
-    const { longitude, latitude } = position.coords;
-    if (!map && typeof L !== "undefined") {
-      map = L.map("map").setView([latitude, longitude], 13);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap contributors",
-      }).addTo(map);
-      console.log("Map initialized with location");
-    } else if (map) {
-      map.setView([latitude, longitude], 13);
-    } else {
-      console.error("Leaflet library not available");
-      updateLocationStatus("Map library not available", "error");
-      return;
+    return await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, options);
+    });
+  } catch (error) {
+    let errorMessage = "Unknown error occurred";
+    switch (error.code) {
+      case error.PERMISSION_DENIED:
+        errorMessage =
+          "Location access denied. Please enable location permissions in your device settings.";
+        break;
+      case error.POSITION_UNAVAILABLE:
+        errorMessage =
+          "Location information unavailable. Please check your GPS settings.";
+        break;
+      case error.TIMEOUT:
+        errorMessage = "Location request timed out. Please try again.";
+        break;
     }
-    updateLocationStatus(`${longitude}, ${latitude}`, "success");
+    throw new Error(errorMessage);
+  }
+}
 
+async function sendLocation(position) {
+  try {
+    const { latitude, longitude } = position.coords;
     const response = await fetch(`${locationUrl}/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -116,66 +191,81 @@ async function onLocationSuccess(position) {
         location: { longitude, latitude },
       }),
     });
-
     updateLocationStatus(`Status: ${response.status}`, "success");
     const locations = await response.json();
-    await updateLocations(locations);
+    return locations;
   } catch (error) {
-    console.error("Error updating locations:", error);
-    updateLocationStatus(`Network error: ${error.message}`, "error");
+    throw new Error(`Failed to send location: ${error.message}`);
   }
 }
 
-async function updateLocations(locations) {
+async function updateMap(locations) {
   try {
-    updateLocationStatus("removing markers", "success");
-    for (const marker of markers) {
-      map.removeLayer(marker);
-    }
-    markers = [];
-    updateLocationStatus("creating markers", "success");
+    updateLocationStatus("updating markers", "success");
+
+    // Create a map to track existing markers by name
+    const oldMarkers = new Map();
+    markers.forEach((marker) => {
+      if (marker.name) {
+        oldMarkers.set(marker.name, marker);
+      }
+    });
+
+    let myPosition = null;
+
+    // Process each location
     for (const [name, { location, lastSeen }] of Object.entries(locations)) {
-      const marker = L.marker([location.latitude, location.longitude]).addTo(
-        map
-      );
-      marker
-        .bindPopup(`<b>${name}</b><br>${new Date(lastSeen).toLocaleString()}`)
-        .openPopup();
-      markers.push(marker);
+      const oldMarker = oldMarkers.get(name);
+
+      // Check if this is my own position
+      if (name === deviceId) {
+        myPosition = [location.latitude, location.longitude];
+      }
+
+      if (oldMarker) {
+        // Update existing marker position
+        oldMarker.setLatLng([location.latitude, location.longitude]);
+        oldMarker.setPopupContent(
+          `<b>${name}</b><br>${new Date(lastSeen).toLocaleString()}`
+        );
+        oldMarkers.delete(name); // Remove from tracking map
+      } else {
+        // Create new marker (without opening popup to avoid centering)
+        const marker = L.marker([location.latitude, location.longitude]).addTo(
+          map
+        );
+        marker.name = name; // Store name for tracking
+        marker.bindPopup(
+          `<b>${name}</b><br>${new Date(lastSeen).toLocaleString()}`
+        );
+        markers.push(marker);
+      }
     }
-    setTimeout(() => mainloop(), 10 * 1000);
+
+    // Remove markers that no longer exist in locations
+    oldMarkers.forEach((marker) => {
+      map.removeLayer(marker);
+      const index = markers.indexOf(marker);
+      if (index > -1) {
+        markers.splice(index, 1);
+      }
+    });
+
+    // Keep my position visible on the map, only move map if I'm going off-screen
+    if (myPosition && map) {
+      const mapBounds = map.getBounds();
+      const [lat, lng] = myPosition;
+
+      // Check if my position is outside the current visible area
+      if (!mapBounds.contains([lat, lng])) {
+        // Pan to my position if I'm off-screen, preserving zoom
+        const currentZoom = map.getZoom();
+        map.setView(myPosition, currentZoom);
+      }
+    }
   } catch (error) {
-    console.error("Error updating locations:", error);
-    updateLocationStatus(error.message, "error");
+    throw new Error(`Failed to update map: ${error.message}`);
   }
-}
-
-function onLocationError(error) {
-  const button = document.getElementById("getLocationBtn");
-  let errorMessage = "Unknown error occurred";
-
-  switch (error.code) {
-    case error.PERMISSION_DENIED:
-      errorMessage =
-        "Location access denied. Please enable location permissions in your device settings.";
-      break;
-    case error.POSITION_UNAVAILABLE:
-      errorMessage =
-        "Location information unavailable. Please check your GPS settings.";
-      break;
-    case error.TIMEOUT:
-      errorMessage = "Location request timed out. Please try again.";
-      break;
-  }
-
-  console.error("Location error:", error);
-
-  // Update status with error
-  updateLocationStatus(errorMessage, "error");
-
-  // Re-enable button
-  button.disabled = false;
-  button.textContent = "Get My Location";
 }
 
 function updateLocationStatus(message, type = "", coordinates = "") {
@@ -200,20 +290,3 @@ function updateLocationStatus(message, type = "", coordinates = "") {
     statusElement.appendChild(coordDiv);
   }
 }
-
-// Handle app pause/resume
-document.addEventListener(
-  "pause",
-  function () {
-    console.log("App paused");
-  },
-  false
-);
-
-document.addEventListener(
-  "resume",
-  function () {
-    console.log("App resumed");
-  },
-  false
-);
