@@ -100,18 +100,22 @@ body {
 
 .location-info {
   background: white;
-  padding: 15px 60px 15px 20px; /* Added more right padding for hamburger button */
+  padding: 8px 50px 8px 12px; /* Reduced padding significantly */
   border-top: 1px solid #e0e0e0;
-  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 -1px 5px rgba(0, 0, 0, 0.05); /* Reduced shadow */
   position: relative;
-  overflow: visible; /* Ensure button isn't clipped */
+  overflow: visible;
+  min-height: 36px; /* Set minimum height for compact look */
+  display: flex;
+  align-items: center; /* Center content vertically */
 }
 
 .location-info p {
   margin: 0;
   color: #666;
-  font-size: 14px;
-  line-height: 1.4;
+  font-size: 12px; /* Smaller font */
+  line-height: 1.2; /* Tighter line spacing */
+  flex: 1; /* Take up available space */
 }
 
 .location-info .coordinates {
@@ -171,25 +175,25 @@ body {
 .settings-button {
   position: absolute;
   top: 50%;
-  right: 15px;
+  right: 8px;
   transform: translateY(-50%);
-  background: rgba(0, 0, 0, 0.1); /* Added slight background for visibility */
+  background: rgba(0, 0, 0, 0.1);
   border: 1px solid rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
+  border-radius: 3px;
   cursor: pointer;
-  padding: 8px;
+  padding: 4px 6px; /* Smaller padding */
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px; /* Reduced gap */
   z-index: 1001;
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 28px; /* Smaller button */
+  min-height: 28px;
   align-items: center;
   justify-content: center;
 }
 
 .hamburger-line {
-  width: 20px;
+  width: 16px; /* Smaller width */
   height: 2px;
   background: #333;
   border-radius: 1px;
