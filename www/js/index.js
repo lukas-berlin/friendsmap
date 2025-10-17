@@ -11,7 +11,6 @@ let settings = {
   updateInterval: 10,
   showArrows: true,
   followMode: "delta",
-  locationAccuracy: true,
   deviceName: "",
 };
 
@@ -68,8 +67,6 @@ function populateSettingsForm() {
   document.getElementById("updateInterval").value = settings.updateInterval;
   document.getElementById("showArrows").checked = settings.showArrows;
   document.getElementById("followMode").value = settings.followMode;
-  document.getElementById("locationAccuracy").checked =
-    settings.locationAccuracy;
   document.getElementById("deviceName").value = settings.deviceName;
 }
 
@@ -79,8 +76,6 @@ function saveSettingsFromForm() {
   );
   settings.showArrows = document.getElementById("showArrows").checked;
   settings.followMode = document.getElementById("followMode").value;
-  settings.locationAccuracy =
-    document.getElementById("locationAccuracy").checked;
   settings.deviceName = document.getElementById("deviceName").value;
 
   saveSettingsToStorage();
@@ -97,6 +92,13 @@ function generateDeviceId() {
   const timestamp = Date.now().toString(36);
   const random = Math.random().toString(36).substr(2, 5);
   return `device_${timestamp}_${random}`;
+}
+
+function getDisplayName() {
+  // Use display name from settings if available, otherwise fallback to deviceId
+  return settings.deviceName && settings.deviceName.trim() !== ""
+    ? settings.deviceName.trim()
+    : deviceId;
 }
 
 function initializeMap() {
@@ -146,7 +148,10 @@ async function mainloop() {
       console.error(error);
       updateLocationStatus(error.message, "error");
     }
-    await new Promise((resolve) => setTimeout(resolve, 10000)); // Wait 60 seconds before next update
+
+    // Use update interval from settings, default to 10 seconds if not set
+    const updateIntervalMs = (settings.updateInterval || 10) * 1000;
+    await new Promise((resolve) => setTimeout(resolve, updateIntervalMs));
   }
 }
 
@@ -183,11 +188,12 @@ async function getCurrentPosition(
 async function sendLocation(position) {
   try {
     const { latitude, longitude } = position.coords;
+    const displayName = getDisplayName();
     const response = await fetch(`${locationUrl}/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: deviceId,
+        name: displayName,
         location: { longitude, latitude },
       }),
     });
@@ -212,13 +218,14 @@ async function updateMap(locations) {
     });
 
     let myPosition = null;
+    const myDisplayName = getDisplayName();
 
     // Process each location
     for (const [name, { location, lastSeen }] of Object.entries(locations)) {
       const oldMarker = oldMarkers.get(name);
 
-      // Check if this is my own position
-      if (name === deviceId) {
+      // Check if this is my own position (compare with current display name)
+      if (name === myDisplayName) {
         myPosition = [location.latitude, location.longitude];
       }
 
